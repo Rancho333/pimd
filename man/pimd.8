@@ -2,28 +2,30 @@
 .\" First parameter, NAME, should be all caps
 .\" Second parameter, SECTION, should be 1-8, maybe w/ subsection
 .\" other parameters are allowed: see man(7), man(1)
-.Dd Mar 3, 2016
+.Dd Jun 23, 2018
 .\" Please adjust this date whenever revising the manpage.
 .Dt PIMD 8 SMM
 .Os
 .Sh NAME
 .Nm pimd
-.Nd PIM-SM/SSM v2 dynamic multicast routing daemon
+.Nd PIM-SM/SSM multicast routing daemon
 .Sh SYNOPSIS
 .Nm pimd
-.Op Fl hNnrsv
+.Op Fl hnrsv
 .Op Fl f Ar FILE
-.Op Fl d Ar [SYS[,SYS,...]
-.Op Fl I Ar NAME
-.Op Fl P Ar FILE
+.Op Fl -no-fallback
+.Op Fl d Ar SYS[,SYS,...]
+.Op Fl i Ar NAME
+.Op Fl -pidfile Ar FILE
+.Op Fl -disable-vifs
 .Op Fl l Ar LEVEL
 .Op Fl t Ar ID
 .Sh DESCRIPTION
 .Nm
-is a lightweight, stand-alone PIM-SM/SSM v2 multicast routing daemon
-available under the free 3-clause BSD license.  This is the restored
-original from University of Southern California, by Ahmed Helmy, Rusty
-Eddy and Pavlin Ivanov Radoslavov.
+is a stand-alone PIM-SM/SSM multicast routing daemon available under the
+free 3-clause BSD license.  This is the restored original from
+University of Southern California, by Ahmed Helmy, Rusty Eddy and Pavlin
+Ivanov Radoslavov.
 .Pp
 Protocol Independent Multicast - Sparse Mode (PIM-SM):
 .Bl -bullet -width 1n -compact
@@ -56,31 +58,33 @@ options starting with two dashes (`-').  The options are as follows:
 .Bl -tag -width Ds
 .It Fl h, -help
 Print a help message and exit.
-.It Fl f, -config=FILE
+.It Fl f, -config Ar FILE
 Specify an alternative configuration file, the default
 .Pa /etc/pimd.conf ,
 is derived from
-.Fl -ident=NAME ,
-which is strongly recommended to change over this option.
-.Pp
+.Fl -ident Ar NAME ,
+which is strongly recommended to use over this option.
+.It Fl -no-fallback
 If
 .Nm
 cannot find its configuration file it will start up with fallback
-defaults, which include enabling both
+defaults for
 .Cm bsr-candidate
 and
 .Cm rp-candidate .
-.It Fl d Ar SYS[,SYS...]
-By default,
+These fallbacks exist to ensure a fully working multicast routing setup.
+However, if there are other PIM routers that act as BSR and RP in the
+network, this option can be used to disable the built-in fallbacks.
+.Pp
+This option works the same as if
 .Nm
-daemonizes itself by detaching from the invoking terminal and forking to
-the background.  However, if
-.Fl d
-or
-.Fl n, -foreground
-is specified,
-.Nm
-runs in the foreground of the starting terminal.  If
+finds an empty configuration file, or when 
+.Cm bsr-candidate
+and
+.Cm rp-candidate
+are commented out.
+.It Fl d, -debug Ar SYS[,SYS...]
+This option controls extended subsystem debugging.  If
 .Fl d
 is given without any argument
 .Nm
@@ -130,8 +134,12 @@ Debug hello messages to/from neighbors
 Run in the foreground, do not detach from calling terminal and do not
 fork to background.  Useful not only when debugging (above) but also
 when running under a process monitor like daemontools, runit, finit, or
-systemd.
-.It Fl I, Fl -ident=NAME
+systemd.  Remember to also use
+.Fl s ,
+to send all logs to the syslog daemon, unless you want to debug
+.Nm
+and run in the foreground.
+.It Fl i, Fl -ident Ar NAME
 Specify program identity (name) to be used for configuration file, PID
 file and syslog messages.  Useful with multiple instances of
 .Nm ,
@@ -139,12 +147,12 @@ or to simply adapt to site specific practices, e.g. "PIM", without
 renaming the binary.  Note, this option only changes the base name of
 the PID or configuration files, not the location, which is system
 specific.  Usually
-.Pa /var/run/pimd/pimd.pid
+.Pa /var/run/pimd/pimd.pid ,
 or
-.Pa /run/pimd.pid
+.Pa /run/pimd.pid ,
 and
 .Pa /etc/pimd.conf .
-.It Fl N, -disable-vifs
+.It Fl -disable-vifs
 This prevents
 .Nm
 from running on all interfaces by default.  When this command line
@@ -152,13 +160,13 @@ option is given, use
 .Cm phyint IFNAME enable
 to selectively activate PIM services on an interface.  This command line
 option is also available as a setting in the configuration file.
-.It Fl P, -pidfile=FILE
+.It Fl -pidfile Ar FILE
 Set PID file name and location, defaults to
-.Pa /run/pimd/pimd.pid ,
+.Pa /var/run/pimd/pimd.pid ,
 derived from
-.Fl -ident=NAME ,
+.Fl -ident Ar NAME ,
 which is strongly recommended to change over this option.
-.It Fl l, -loglevel=LEVEL
+.It Fl l, -loglevel Ar LEVEL
 Set log level to one of the following, default
 .Nm notice :
 .Pp
@@ -178,7 +186,7 @@ Debug-level messages
 .El
 .It Fl r
 With this option, and
-.Fl N ,
+.Fl -disable-vifs ,
 .Nm
 will retry (forever) querying the kernel for all required
 .Cm phyint
@@ -186,10 +194,10 @@ interfaces listed in
 .Pa /etc/pimd.conf .
 Useful at startup when not all interfaces may be up or have an IP
 address assigned yet.
-.It Fl s, --syslog
+.It Fl s, -syslog
 Use syslog, default unless running in foreground,
 .Fl n .
-.It Fl t, -table-id=ID
+.It Fl t, -table-id Ar ID
 Set multicast routing table ID.  Remember to also create routing rules
 directing packets to the table.  This example uses routing table ID 123:
 .Bd -unfilled -offset left
@@ -223,8 +231,6 @@ setting and the
 setting can be used to control this behavior.  The former can also be
 set from the command line using the
 .Fl -disable-vifs
-or
-.Fl N
 option.  More on the
 .Cm phyint
 interface configuration setting below.
@@ -252,6 +258,7 @@ interface configuration setting below.
 .Cm <address | ifname>
 .Bl -item -offset indent
 .Op Cm disable | enable
+.br
 .Op Cm igmpv2 | igmpv3
 .br
 .Op Cm dr-priority Ar <1-4294967294>
@@ -367,7 +374,7 @@ are some additional settings:
 Selectively enable this interface for
 .Nm .
 Useful with the
-.Fl N, -disable-vifs
+.Fl -disable-vifs
 command line option and the
 .Cm disable-vifs
 configuration file setting.
@@ -376,7 +383,7 @@ configuration file setting.
 Do not use this interface in
 .Nm .
 Default enable, unless
-.Fl N, -disable-vifs .
+.Fl -disable-vifs .
 .It
 .Nm igmpv2 :
 Force interface to use IGMPv2, or
@@ -428,20 +435,20 @@ Add one
 line per interface on this router.  If you don't do this,
 .Nm pimd
 will either be completely silent (if you provide the
-.Fl N
-command line option), or simply assume that you want it to utilize all interfaces
-using default settings.
+.Fl -disable-vifs
+command line option), or simply assume that you want to run
+.Nm
+on all interfaces using default settings.
 .Pp
 Both the
 .Cm bsr-candidate
 (CBSR) and
 .Cm rp-candidate
-(CRP) settings are enabled in the default configuration.  Disabling
-them, by commenting them out in the config file, for all PIM capable
-routers is a bad idea.  When troubleshooting, ensure at least one
-bootstrap router (BSR) and at least one rendez-vous point (RP) in
-PIM-SM, is available.  Both settings share the following options, with
-priority being interpreted differently:
+(CRP) settings are enabled in the default configuration file.  You can
+disable them by commenting them out, however, make sure at least one
+bootstrap router (BSR) and at least one rendezvous-point (RP) in PIM-SM,
+is available in the network.  Both settings share the following options,
+with priority being interpreted differently:
 .Pp
 .Bl -bullet -offset indent -width 1n -compact
 .It
@@ -491,7 +498,7 @@ may be given, but max number of records supported in pimd is 255.
 The
 .Nm rp-address
 setting is for static rendezvous point (RP) configurations.  It defines
-the RP for a given group, or range or groups.  The argument can be
+the RP for a given group, or range of groups.  The argument can be
 either a unicast address or a multicast group, with an optional group
 address and netmask.  Default group and netmask is 224.0.0.0/16.
 .Nm Note:
@@ -510,7 +517,10 @@ packet, but only after 100 seconds.  If
 is specified the shortest path switch-over is disabled.
 .Sh SIGNALS
 .Nm
-responds to the following signals:
+responds to the following signals.  However, consider using
+.Nm pimctl
+instead since this gives more and better output, and is also less prone
+to race conditions.
 .Pp
 .Bl -tag -width TERM -compact
 .It HUP
@@ -522,33 +532,30 @@ Terminate execution gracefully, i.e. by sending good-bye messages to neighboring
 routers
 .It INT
 The same as TERM
-.It USR1
-Dumps internal state of VIFs and multicast routing tables to
-.Pa /var/run/pimd/pimd.dump .
-.\" Not implemented yet, still TODO
-.\" .It USR2
-.\" Dumps the internal cache tables to
-.\" .Pa /var/run/pimd/pimd.cache .
-.\" Also not implemented yet, TODO
-.\" .It QUIT
-.\" Dumps the internal routing tables to stderr (only if
-.\" .Nm
-.\" was invoked with a non-zero debug level).
 .El
 .Pp
 For convenience in sending signals,
 .Nm
 writes its process ID to
-.Pa /var/run/pimd.pid
-upon startup.
+.Pa /var/run/pimd/pimd.pid
+upon startup.  If started with a different identy,
+.Fl i Ar NAME ,
+then
+.Ar NAME
+is used as basename of the PID file.
 .Sh FILES
+The basename of the following files change if
+.Nm
+is started with a different identity,
+.Fl i Ar NAME :
+.Pp
 .Bl -tag -width /var/run/pimd/pimd.cache -compact
 .It Pa /etc/pimd.conf
-.\" .It Pa /var/run/pimd/pimd.cache
-.It Pa /var/run/pimd/pimd.dump
 .It Pa /var/run/pimd/pimd.pid
+.It Pa /var/run/pimd/pimd.sock
 .El
 .Sh SEE ALSO
+.Xr pimctl 8 ,
 .Xr mrouted 8 ,
 .Xr smcroute 8 ,
 .Xr /usr/share/doc/pimd/

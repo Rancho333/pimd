@@ -30,12 +30,20 @@
 #include "defs.h"
 #include <getopt.h>
 #include <poll.h>
+#ifdef HAVE_TERMIOS_H
+# include <termios.h>
+#endif
 
-struct command {
-	char  *cmd;
-	int  (*cb)(char *arg);
+struct cmd {
+	char        *cmd;
+	struct cmd  *ctx;
+	int        (*cb)(char *arg);
+	int         op;
 };
 
+static int plain = 0;
+static int detail = 0;
+static int heading = 1;
 static int verbose = 0;
 static int interactive = 1;
 
@@ -45,7 +53,6 @@ char *ident = "pimd";
 static int do_connect(char *ident)
 {
 	struct sockaddr_un sun;
-	char path[256];
 	int sd;
 
 #ifdef HAVE_SOCKADDR_UN_SUN_LEN
@@ -68,17 +75,26 @@ error:
 	return -1;
 }
 
-static struct ipc *do_cmd(uint8_t cmd)
+static struct ipc *do_cmd(uint8_t cmd, int detail, char *buf, size_t len)
 {
-	static struct ipc msg;
+	static struct ipc msg = { 0 };
 	struct pollfd pfd;
 	int sd;
+
+	if (buf && len >= sizeof(msg.buf)) {
+		errno = EINVAL;
+		return NULL;
+	}
 
 	sd = do_connect(ident);
 	if (-1 == sd)
 		return NULL;
 
 	msg.cmd = cmd;
+	msg.detail = detail;
+	if (buf)
+		memcpy(msg.buf, buf, len);
+
 	if (write(sd, &msg, sizeof(msg)) == -1)
 		goto fail;
 
@@ -99,32 +115,122 @@ fail:
 	return NULL;
 }
 
-static int show_generic(int cmd)
+static int do_set(int cmd, char *arg)
 {
 	struct ipc *msg;
-	char show[512];
 
-	msg = do_cmd(cmd);
+	if (!arg)
+		arg = "";
+
+	msg = do_cmd(cmd, 0, arg, strlen(arg));
+	if (!msg)
+		return 1;
+
+	if (strlen(msg->buf) > 1)
+		puts(msg->buf);
+
+	return 0;
+}
+
+static int set_debug(char *arg)
+{
+	return do_set(IPC_DEBUG_CMD, arg);
+}
+
+static int set_loglevel(char *arg)
+{
+	return do_set(IPC_LOGLEVEL_CMD, arg);
+}
+
+#define ESC "\033"
+static int get_width(void)
+{
+	int ret = 74;
+#ifdef HAVE_TERMIOS_H
+	char buf[42];
+	struct termios tc, saved;
+	struct pollfd fd = { STDIN_FILENO, POLLIN, 0 };
+
+	memset(buf, 0, sizeof(buf));
+	tcgetattr(STDERR_FILENO, &tc);
+	saved = tc;
+	tc.c_cflag |= (CLOCAL | CREAD);
+	tc.c_lflag &= ~(ICANON | ECHO | ECHOE | ISIG);
+	tcsetattr(STDERR_FILENO, TCSANOW, &tc);
+	fprintf(stderr, ESC "7" ESC "[r" ESC "[999;999H" ESC "[6n");
+
+	if (poll(&fd, 1, 300) > 0) {
+		int row, col;
+
+		if (scanf(ESC "[%d;%dR", &row, &col) == 2)
+			ret = col;
+	}
+
+	fprintf(stderr, ESC "8");
+	tcsetattr(STDERR_FILENO, TCSANOW, &saved);
+#endif
+	return ret;
+}
+
+static char *chomp(char *str)
+{
+	char *p;
+
+	if (!str || strlen(str) < 1) {
+		errno = EINVAL;
+		return NULL;
+	}
+
+	p = str + strlen(str) - 1;
+        while (*p == '\n')
+		*p-- = 0;
+
+	return str;
+}
+
+static int show_generic(int cmd, int detail)
+{
+	struct ipc *msg;
+	FILE *fp;
+	char line[512];
+
+	msg = do_cmd(cmd, detail, NULL, 0);
 	if (!msg)
 		return -1;
 
-	snprintf(show, sizeof(show), "cat %s", msg->buf);
-	return system(show);
-}
+	fp = fopen(msg->buf, "r");
+	if (!fp)
+		return 1;
 
-static int show_interface(char *arg)
-{
-	return show_generic(IPC_IFACE_CMD);
-}
+	while (fgets(line, sizeof(line), fp)) {
+		int len, head = 0;
 
-static int show_neighbor(char *arg)
-{
-	return show_generic(IPC_NEIGH_CMD);
-}
+		chomp(line);
 
-static int show_status(char *arg)
-{
-	return show_generic(IPC_STAT_CMD);
+		/* Table headings, or repeat headers, end with a '=' */
+		len = (int)strlen(line) - 1;
+		if (len > 0 && line[len] == '=') {
+			if (!heading)
+				continue;
+			line[len] = 0;
+			head = 1;
+			if (!plain)
+				len = get_width() - len;
+		}
+
+		if (head && !plain)
+			fprintf(stdout, "\e[7m%s%*s\e[0m\n", line, len < 0 ? 0 : len, "");
+		else
+			puts(line);
+
+		if (head && plain) {
+			while (len--)
+				fputc('=', stdout);
+			fputs("\n", stdout);
+		}
+	}
+
+	return fclose(fp) || remove(msg->buf);
 }
 
 static int string_match(const char *a, const char *b)
@@ -137,47 +243,155 @@ static int string_match(const char *a, const char *b)
 static int usage(int rc)
 {
 	fprintf(stderr,
-		"Usage: %s [OPTIONS] [COMMAND]\n"
+		"Usage: pimctl [OPTIONS] [COMMAND]\n"
 		"\n"
 		"Options:\n"
 		"  -b, --batch               Batch mode, no screen size probing\n"
+		"  -d, --detail              Detailed output, where applicable\n"
+		"  -i, --ident=NAME          Connect to named pimd instance\n"
+		"  -p, --plain               Use plain table headings, no ctrl chars\n"
+		"  -t, --no-heading          Skip table headings\n"
 		"  -v, --verbose             Verbose output\n"
 		"  -h, --help                This help text\n"
 		"\n"
 		"Commands:\n"
-		"  interface                 Show PIM interfaces\n"
-		"  neighbor                  Show PIM neighbors/adjacencies\n"
-		"  status                    Show PIM daemon status\n",
-		"pimctl");
+		"  debug [? | none | SYS]    Debug subystem(s), separate multiple with comma\n"
+		"  help                      This help text\n"
+		"  kill                      Kill running daemon, like SIGTERM\n"
+		"  log [? | none | LEVEL]    Set pimd log level: none, err, notice*, info, debug\n"
+		"  restart                   Restart pimd and reload .conf file, like SIGHUP\n"
+		"  version                   Show pimd version\n"
+		"  show status               Show pimd status, default\n"
+		"  show igmp groups          Show IGMP group memberships\n"
+		"  show igmp interface       Show IGMP interface status\n"
+		"  show pim interface        Show PIM interface table\n"
+		"  show pim neighbor         Show PIM neighbor table\n"
+		"  show pim routes           Show PIM routing table\n"
+		"  show pim rp               Show PIM Rendezvous-Point (RP) set\n"
+		"  show pim crp              Show PIM Candidate Rendezvous-Point (CRP) from BSR\n"
+		"  show pim compat           Show PIM status, compat mode, previously `pimd -r`\n"
+		);
+
+	return rc;
+}
+
+static int help(char *arg)
+{
+	(void)arg;
+	return usage(0);
+}
+
+static int version(char *arg)
+{
+	(void)arg;
+	printf("v%s\n", PACKAGE_VERSION);
+
 	return 0;
+}
+
+static int cmd_parse(int argc, char *argv[], struct cmd *command)
+{
+	int i;
+
+	for (i = 0; argc > 0 && command[i].cmd; i++) {
+		if (!string_match(command[i].cmd, argv[0]))
+			continue;
+
+		if (command[i].ctx)
+			return cmd_parse(argc - 1, &argv[1], command[i].ctx);
+
+		if (command[i].cb) {
+			char arg[80] = "";
+			int j;
+
+			for (j = 1; j < argc; j++) {
+				if (j > 1)
+					strlcat(arg, " ", sizeof(arg));
+				strlcat(arg, argv[j], sizeof(arg));
+			}
+
+			return command[i].cb(arg);
+		}
+
+		return show_generic(command[i].op, detail);
+	}
+
+	return usage(1);
 }
 
 int main(int argc, char *argv[])
 {
 	struct option long_options[] = {
-		{"batch",   0, NULL, 'b'},
-		{"help",    0, NULL, 'h'},
-		{"debug",   0, NULL, 'd'},
-		{"verbose", 0, NULL, 'v'},
-		{NULL, 0, NULL, 0}
+		{ "batch",      0, NULL, 'b' },
+		{ "detail",     0, NULL, 'd' },
+		{ "ident",      1, NULL, 'i' },
+		{ "no-heading", 0, NULL, 't' },
+		{ "plain",      0, NULL, 'p' },
+		{ "help",       0, NULL, 'h' },
+		{ "debug",      0, NULL, 'd' },
+		{ "verbose",    0, NULL, 'v' },
+		{ NULL, 0, NULL, 0 }
 	};
-	struct command command[] = {
-		{ "interface", show_interface },
-		{ "neighbor",  show_neighbor },
-		{ "status",    show_status },
-		{ NULL, NULL }
+	struct cmd igmp[] = {
+		{ "groups",    NULL, NULL, IPC_SHOW_IGMP_GROUPS_CMD },
+		{ "interface", NULL, NULL, IPC_SHOW_IGMP_IFACE_CMD  },
+		{ "iface",     NULL, NULL, IPC_SHOW_IGMP_IFACE_CMD  }, /* ALIAS */
+		{ NULL }
+	};
+	struct cmd pim[] = {
+		{ "interface", NULL, NULL, IPC_SHOW_PIM_IFACE_CMD },
+		{ "iface",     NULL, NULL, IPC_SHOW_PIM_IFACE_CMD }, /* ALIAS */
+		{ "neighbor",  NULL, NULL, IPC_SHOW_PIM_NEIGH_CMD },
+		{ "routes",    NULL, NULL, IPC_SHOW_PIM_ROUTE_CMD },
+		{ "rp",        NULL, NULL, IPC_SHOW_PIM_RP_CMD    },
+		{ "crp",       NULL, NULL, IPC_SHOW_PIM_CRP_CMD   },
+		{ "compat",    NULL, NULL, IPC_SHOW_PIM_DUMP_CMD  },
+		{ NULL }
+	};
+	struct cmd show[] = {
+		{ "igmp",      igmp, NULL, 0                    },
+		{ "pim",       pim,  NULL, 0                    },
+		{ "status",    NULL, NULL, IPC_SHOW_STATUS_CMD  },
+		{ NULL }
+	};
+	struct cmd command[] = {
+		{ "debug",     NULL, set_debug,    0                   },
+		{ "help",      NULL, help,         0                   },
+		{ "kill",      NULL, NULL,         IPC_KILL_CMD        },
+		{ "log",       NULL, set_loglevel, 0                   },
+		{ "status",    NULL, NULL,         IPC_SHOW_STATUS_CMD },
+		{ "restart",   NULL, NULL,         IPC_RESTART_CMD     },
+		{ "version",   NULL, version,      0                   },
+		{ "show",      show, NULL,         0                   },
+		{ NULL }
 	};
 	int c;
 
-	while ((c = getopt_long(argc, argv, "bh?v", long_options, NULL)) != EOF) {
+	while ((c = getopt_long(argc, argv, "bdh?i:ptv", long_options, NULL)) != EOF) {
 		switch(c) {
 		case 'b':
 			interactive = 0;
 			break;
 
+		case 'd':
+			detail = 1;
+			break;
+
 		case 'h':
 		case '?':
 			return usage(0);
+
+		case 'i':	/* --ident=NAME */
+			ident = optarg;
+			break;
+
+		case 'p':
+			plain = 1;
+			break;
+
+		case 't':
+			heading = 0;
+			break;
 
 		case 'v':
 			verbose = 1;
@@ -186,16 +400,9 @@ int main(int argc, char *argv[])
 	}
 
 	if (optind >= argc)
-		return show_status(NULL);
+		return show_generic(IPC_SHOW_STATUS_CMD, detail);
 
-	for (c = 0; command[c].cmd; c++) {
-		if (!string_match(command[c].cmd, argv[optind]))
-			continue;
-
-		return command[c].cb(NULL);
-	}
-
-	return usage(1);
+	return cmd_parse(argc - optind, &argv[optind], command);
 }
 
 /**

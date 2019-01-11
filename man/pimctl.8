@@ -1,0 +1,209 @@
+.Dd Jan 2, 2019
+.Dt PIMCTL 8 SMM
+.Os
+.Sh NAME
+.Nm pimctl
+.Nd Control tool for
+.Xr pimd 8
+.Sh SYNOPSIS
+.Nm pimctl
+.Op Fl bdptvh
+.Op Fl i Ar NAME
+.Op COMMAND
+.Nm
+.Ar help | kill | restart | version
+.Pp
+.Nm
+.Ar debug Op ? | none | SYSTEM Op ,SYSTEM
+.Nm
+.Ar log Op ? | none | LEVEL
+.Pp
+.Nm
+.Ar show igmp groups
+.Nm
+.Ar show igmp interface
+.Pp
+.Nm
+.Ar show pim interface
+.Nm
+.Ar show pim neighbor
+.Nm
+.Ar show pim routes
+.Nm
+.Ar show pim rp
+.Nm
+.Ar show pim crp
+.Nm
+.Ar show pim compat
+.Pp
+.Nm
+.Op Ar show status
+.Sh DESCRIPTION
+.Nm
+is the friendly control tool for
+.Xr pimd 8 .
+It can be used to query status, debug, restart, and kill a running pimd.
+Commands can be abbreviated to the minimum unambiguous prefix; for
+example,
+.Cm s s
+for
+.Cm show status .
+.Sh OPTIONS
+This program follows the usual UNIX command line syntax, with long
+options starting with two dashes (`-').  The options are as follows:
+.Bl -tag -width Ds
+.It Fl b, -batch
+Batch mode, no screen size probing is performed on the TTY.
+.It Fl d, -detail
+Detailed output, where applicable, see each command below.
+.It Fl h, -help
+Show usage instructions and exit.
+.It Fl i, -ident Ar NAME
+Connect to named pimd instance.
+.It Fl p, -plain
+Use plain table headings, no ANSI ctrl characters.
+.It Fl t, -no-heading
+Skip table headings altogether.
+.It Fl v, -verbose
+Verbose output.
+.El
+.Sh COMMANDS
+The following commands are available:
+.Bl -tag -width Ds
+.It Nm Ar help
+Show usage instructions and exit.
+.It Nm Ar kill
+Kill running daemon, like sending SIGTERM to
+.Xr pimd 8
+.It Nm Ar debug Op ? | none | SYSTEM Op ,SYSTEM
+Control subystem debugging at runtime.  Multiple subsystems can be
+enabled, separate with comma.  E.g.
+.Bd -unfilled -offset indent
+pimctl debug igmp,pim
+.Ed
+.Pp
+The command returns a list of enabled subsystems.  Without any debug
+argument, the command lists the currently enabled subsystems.  To list
+all available subsystems, use
+.Bd -unfilled -offset indent
+pimctl debug ?
+.Ed
+.Pp
+To disable all subsystems, use
+.Bd -unfilled -offset indent
+pimctl debug none
+.Ed
+.Pp
+Subsystems:
+.Pp
+.Bl -tag -width pim_routes -compact -offset indent
+.It Cm packet
+Debug inbound/outbout packets
+.It Cm prunes
+Pruning operations, or pruned routes
+.It Cm routes
+Routing messages
+.It Cm rtdetail
+Detailed routing information
+.It Cm peers
+Neighbor gossip
+.It Cm cache
+Debug routing cache
+.It Cm timeout
+Debug timeouts
+.It Cm interface
+Show interface (VIF) debug messages
+.It Cm groups
+Debug group memberships
+.It Cm mtrace
+Multicast traceroute information
+.It Cm igmp
+Debug IGMP messages
+.It Cm icmp
+Debug ICMP messages
+.It Cm rsrr
+Debug RSRR messages
+.It Cm pim
+All PIM messages
+.It Cm pim_routes
+PIM routing messages
+.It Cm pim_bsr
+PIM bootstrap router messages
+.It Cm pim_detail
+Detailed PIM debug
+.It Cm pim_hello
+Debug hello messages to/from neighbors
+.It Cm all
+Enable all subsystems (may trigger log rate limiter)
+.El
+.It Nm Ar log Op ? | none | LEVEL
+Control, query, or disable
+.Xr pimd 8
+log level:
+.Pp
+.Bl -tag -width WARNING -compact -offset indent
+.It Cm none
+Disable all logging
+.It Cm error
+Error conditions
+.It Cm warning
+Warning conditions
+.It Cm notice
+Normal but significant condition (Default)
+.It Cm info
+Informational
+.It Cm debug
+Debug-level messages
+.El
+.It Nm Ar restart
+Restart daemon and reload
+.Pa /etc/pimd.conf ,
+like sending SIGHUP to
+.Xr pimd 8
+.It Nm Ar show igmp groups
+Show IGMP group memberships
+.It Nm Ar show igmp interfaces
+Show IGMP interface status
+.It Nm Ar show pim interfaces
+Show PIM interface table
+.It Nm Ar show pim neighbor
+Show PIM neighbor table
+.It Nm Ar show pim routes
+Show PIM routing table
+.It Nm Ar show pim rp
+Show PIM Rendezvous-Point (RP) set
+.It Nm Ar show pim crp
+Show PIM Candidate Rendezvous-Point (CRP) from BSR
+.It Nm Ar show pim compat
+Show PIM status, compat mode.  Previously available as
+.Nm pimd Fl r ,
+as well as sending
+.Xr pimd 8
+SIGUSR1 to get output in
+.Pa /var/run/pimd/pimd.dump
+.It Nm Op Ar show status
+Show
+.Xr pimd 8
+status, default
+.El
+.Sh FILES
+.Bl -tag -width /var/run/pimd/pimd.sockXX -compact
+.It Pa /var/run/pimd/pimd.sock
+.Ux Ns -domain
+socket used for communication with
+.Xr pimd 8
+.El
+.Pp
+Note, the basename used changes when running with a different identity,
+.Fl i Ar NAME
+.Sh SEE ALSO
+.Xr pimd 8 ,
+.Xr /usr/share/doc/pimd/
+.Sh AUTHORS
+.Nm pimd
+was originally written by Ahmed Helmy, George Edmond "Rusty" Eddy, and
+Pavlin Ivanov Radoslavov.  PIM-SSM, including full IGMPv3 support, was
+added by Markus Veranen.  With contributions by many others.
+.Pp
+.Nm
+was written by Joachim Nilsson.

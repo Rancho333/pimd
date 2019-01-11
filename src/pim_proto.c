@@ -161,8 +161,10 @@ int receive_pim_hello(uint32_t src, uint32_t dst __attribute__((unused)), char *
 	logit(LOG_INFO, 0, "Received PIM HELLO from new neighbor %s", inet_fmt(src, s1, sizeof(s1)));
 
     new_nbr = calloc(1, sizeof(pim_nbr_entry_t));
-    if (!new_nbr)
+    if (!new_nbr) {
 	logit(LOG_ERR, 0, "Ran out of memory in receive_pim_hello()");
+	return FALSE;
+    }
 
     new_nbr->address          = src;
     new_nbr->vifi             = vifi;
@@ -186,13 +188,14 @@ int receive_pim_hello(uint32_t src, uint32_t dst __attribute__((unused)), char *
     v->uv_flags &= ~VIFF_NONBRS;
     v->uv_flags |= VIFF_PIM_NBR;
 
-    /* Since a new neighbour has come up, let it know your existence */
-    /* XXX: TODO: not in the spec,
-     * but probably should send the message after a short random period?
+  rebooted:
+    /*
+     * A new neighbour has come up, let it know we exist too.  First
+     * we must send a proper greeting, then we can send bootstrap.
+     * See RFC 5059, section 3.5
      */
     send_pim_hello(v, pim_timer_hello_holdtime);
 
-  rebooted:
     if (v->uv_flags & VIFF_DR) {
 	/*
 	 * If I am the current DR on that interface, so
@@ -234,9 +237,6 @@ int receive_pim_hello(uint32_t src, uint32_t dst __attribute__((unused)), char *
      * TODO: XXX: does a new neighbor change any routing entries info?
      * Need to trigger joins?
      */
-
-    IF_DEBUG(DEBUG_PIM_HELLO)
-	dump_vifs(stderr);      /* Show we got a new neighbor */
 
     return TRUE;
 }
@@ -696,6 +696,7 @@ int receive_pim_register(uint32_t reg_src, uint32_t reg_dst, char *msg, size_t l
 	/* TODO: XXX: shouldn't it be inner_src=INADDR_ANY? Not in the spec. */
 	send_pim_register_stop(reg_dst, reg_src, inner_grp, inner_src);
 
+#if 0 /* Disabled due to regression, see https://github.com/troglobit/pimd/issues/128 */
 	/* Create mrtentry for forthcoming join requests. Once one occurs
 	 * we know who is sending to this group and can send join to
 	 * that immediately. Saves 0 - 60 seconds not to wait next
@@ -713,6 +714,7 @@ int receive_pim_register(uint32_t reg_src, uint32_t reg_dst, char *msg, size_t l
                           mrtentry->pruned_oifs,
                           mrtentry->leaves,
                           mrtentry->asserted_oifs, 0);
+#endif
 
 	return TRUE;
     }
@@ -2480,7 +2482,7 @@ int add_jp_entry(pim_nbr_entry_t *pim_nbr, uint16_t holdtime, uint32_t group,
 	bjpm = get_jp_working_buff();
 	if (!bjpm) {
 	    logit(LOG_ERR, 0, "Failed allocating working buffer in add_jp_entry()");
-	    exit (-1);
+	    return FALSE;
 	}
 
 	pim_nbr->build_jp_message = bjpm;
@@ -2574,6 +2576,7 @@ static build_jp_message_t *get_jp_working_buff(void)
 	    free(bjpm);
 	    return NULL;
 	}
+
 	bjpm->join_list_size = 0;
 	bjpm->join_addr_number = 0;
 	bjpm->join_list = calloc(1, MAX_JP_MESSAGE_SIZE - sizeof(pim_jp_encod_grp_t));
@@ -2582,6 +2585,7 @@ static build_jp_message_t *get_jp_working_buff(void)
 	    free(bjpm);
 	    return NULL;
 	}
+
 	bjpm->prune_list_size = 0;
 	bjpm->prune_addr_number = 0;
 	bjpm->prune_list = calloc(1, MAX_JP_MESSAGE_SIZE - sizeof(pim_jp_encod_grp_t));
@@ -2591,6 +2595,7 @@ static build_jp_message_t *get_jp_working_buff(void)
 	    free(bjpm);
 	    return NULL;
 	}
+
 	bjpm->rp_list_join_size = 0;
 	bjpm->rp_list_join_number = 0;
 	bjpm->rp_list_join = calloc(1, MAX_JP_MESSAGE_SIZE - sizeof(pim_jp_encod_grp_t));
@@ -2601,6 +2606,7 @@ static build_jp_message_t *get_jp_working_buff(void)
 	    free(bjpm);
 	    return NULL;
 	}
+
 	bjpm->rp_list_prune_size = 0;
 	bjpm->rp_list_prune_number = 0;
 	bjpm->rp_list_prune = calloc(1, MAX_JP_MESSAGE_SIZE - sizeof(pim_jp_encod_grp_t));
@@ -2612,6 +2618,7 @@ static build_jp_message_t *get_jp_working_buff(void)
 	    free(bjpm);
 	    return NULL;
 	}
+
 	bjpm->curr_group = INADDR_ANY_N;
 	bjpm->curr_group_msklen = 0;
 	bjpm->holdtime = 0;
@@ -3170,7 +3177,7 @@ int receive_pim_bootstrap(uint32_t src, uint32_t dst, char *msg, size_t len)
 
     /* sanity check for the minimum length */
     if (len < PIM_BOOTSTRAP_MINLEN) {
-	logit(LOG_NOTICE, 0, "receive_pim_bootstrap: Bootstrap message size(%u) is too short from %s",
+	logit(LOG_NOTICE, 0, "Bootstrap message size(%u) is too short from %s",
 	      len, inet_fmt(src, s1, sizeof(s1)));
 
 	return FALSE;
@@ -3245,10 +3252,19 @@ int receive_pim_bootstrap(uint32_t src, uint32_t dst, char *msg, size_t len)
 
 	/* Probably unicasted from the current DR */
 	if (cand_rp_list) {
-	    /* Hmmm, I do have a Cand-RP-list, but some neighbor has a
-	     * different opinion and is unicasting it to me. Ignore this guy.
-	     */
-	    return FALSE;
+	    struct cand_rp *rp;
+
+	    /* We have a Cand-RP-list already, check for static ones ... */
+	    for (rp = cand_rp_list; rp; rp = rp->next) {
+		rpentry_t *entry = rp->rpentry;
+
+		/* Skip static/configured ones */
+		if (entry->adv_holdtime == (uint16_t)0xffffff)
+		    continue;
+
+		/* Ignore this guy. */
+		return FALSE;
+	    }
 	}
 
 	for (vifi = 0; vifi < numvifs; vifi++) {

@@ -44,7 +44,8 @@
 #define PIMD_DEBUG_H_
 
 extern unsigned long	debug;
-extern int log_nmsgs;
+extern int              loglevel;
+extern int              log_nmsgs;
 #define IF_DEBUG(l)	if (debug && (debug & (l)))
 
 #define LOG_MAX_MSGS	100	/* if > 100/minute then shut up for a while */
@@ -102,8 +103,25 @@ extern int log_nmsgs;
 #define DEBUG_TIMER           ( DEBUG_IGMP_TIMER | DEBUG_DVMRP_TIMER | \
 				DEBUG_PIM_TIMER )
 #define DEBUG_ASSERT          ( DEBUG_PIM_ASSERT )
+#define DEBUG_PARSE_FAIL      0x80000000
 #define DEBUG_ALL             0xffffffff
 
-int loglvl(char *level);
+extern char	*packet_kind		(int proto, int type, int code);
+extern int	debug_kind		(int proto, int type, int code);
+extern int      debug_list              (int mask, char *buf, size_t len);
+extern int      debug_parse             (char *arg);
+extern void	dump_frame		(char *desc, void *dump, size_t len);
+extern int	log_level		(int proto, int type, int code);
+extern void	dump_vifs		(FILE *fp);
+extern void	dump_ssm		(FILE *fp);
+extern void	dump_pim_mrt		(FILE *fp);
+extern int	dump_rp_set		(FILE *fp);
+
+extern void	log_init		(int do_syslog);
+extern int      log_str2lvl             (char *level);
+extern char    *log_lvl2str             (int val);
+extern int      log_list                (char *buf, size_t len);
+
+extern void	logit			(int severity, int syserr, const char *fmt, ...);
 
 #endif /* PIMD_DEBUG_H_ */

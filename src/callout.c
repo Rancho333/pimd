@@ -12,9 +12,8 @@
 
 #include "defs.h"
 
-/* the code below implements a callout queue */
+static struct timeout_q *Q = NULL;
 static int id = 0;
-static struct timeout_q  *Q = 0; /* pointer to the beginning of timeout queue */
 
 struct timeout_q {
     struct timeout_q *next;		/* next event */
@@ -29,70 +28,75 @@ struct timeout_q {
 #define CALLOUT_DEBUG2 1
 #endif /* 0 */
 #ifdef CALLOUT_DEBUG2
-static void print_Q((void);
+static void print_Q(void);
 #else
 #define	print_Q()	
 #endif
 
-void
-callout_init()
+/* Get next free (non-zero) ID
+ *
+ * TODO: Refactor pimd to use uint32_t for ID.
+ *       For now, make sure timer ID is never <= 0
+ *
+ * ID is a counter that wraps to zero, which is reserved.
+ * The range of counters IDs is big so we should be OK.
+ */
+static int next_id(void)
 {
-    Q = (struct timeout_q *) 0;
+    id++;
+    if (id <= 0)
+	id = 1;
+
+    return id;
 }
 
-void
-free_all_callouts()
+void callout_init(void)
+{
+    Q = NULL;
+    id = 0;
+}
+
+void free_all_callouts(void)
 {
     struct timeout_q *p;
     
     while (Q) {
 	p = Q;
 	Q = Q->next;
+	if (p->data)
+	    free(p->data);
 	free(p);
     }
-}
 
+    callout_init();
+}
 
 /*
  * elapsed_time seconds have passed; perform all the events that should
  * happen.
  */
-void
-age_callout_queue(elapsed_time)
-    int elapsed_time;
+void age_callout_queue(int elapsed_time)
 {
-    struct timeout_q *ptr, *expQ;
-    
+    struct timeout_q *ptr;
+
 #ifdef CALLOUT_DEBUG
     IF_DEBUG(DEBUG_TIMEOUT)
 	logit(LOG_DEBUG, 0, "aging queue (elapsed time %d):", elapsed_time);
     print_Q();
 #endif
     
-    expQ = Q;
-    ptr = NULL;
-    
-    while (Q) {
-	if (Q->time > elapsed_time) {
-	    Q->time -= elapsed_time;
-	    if (ptr) {
-		ptr->next = NULL;
-		break;
-	    }
-	    return;
-	} else {
-	    elapsed_time -= Q->time;
-	    ptr = Q;
-	    Q = Q->next;
+    for (ptr = Q; Q; ptr = Q) {
+	if (ptr->time  > elapsed_time) {
+	    ptr->time -= elapsed_time;
+	    break;
 	}
-    }
-    
-    /* handle queue of expired timers */
-    while (expQ) {
-	ptr = expQ;
+
+	/* ptr has expired, push Q */
+	Q             = ptr->next;
+	elapsed_time -= ptr->time;
+
 	if (ptr->func)
 	    ptr->func(ptr->data);
-	expQ = expQ->next;
 	free(ptr);
     }
 }
@@ -101,30 +105,28 @@ age_callout_queue(elapsed_time)
  * Return in how many seconds age_callout_queue() would like to be called.
  * Return -1 if there are no events pending.
  */
-int
-timer_nextTimer()
+int timer_nextTimer(void)
 {
-    if (Q) {
-	if (Q->time < 0) {
-	    logit(LOG_WARNING, 0, "timer_nextTimer top of queue says %d", 
-		Q->time);
-	    return 0;
-	}
-	return Q->time;
+    if (!Q)
+	return -1;
+
+    if (Q->time < 0) {
+	logit(LOG_WARNING, 0, "%s(): top of queue says %d", __func__, Q->time);
+	return 0;
     }
-    return -1;
+
+    return Q->time;
 }
 
 /* 
- * sets the timer
+ * Create a timer
+ * @delay: Number of seconds for timeout
+ * @action: Timer callback
+ * @data: Optional callback data, must be a dynically allocated ptr
  */
-int
-timer_setTimer(delay, action, data)
-    int 	delay;  	/* number of units for timeout */
-    cfunc_t	action; 	/* function to be called on timeout */
-    void  	*data;  	/* what to call the timeout function with */
+int timer_setTimer(int delay, cfunc_t action, void *data)
 {
-    struct     timeout_q  *ptr, *node, *prev;
+    struct timeout_q *ptr, *node, *prev;
     
 #ifdef CALLOUT_DEBUG
     IF_DEBUG(DEBUG_TIMEOUT)
@@ -133,16 +135,17 @@ timer_setTimer(delay, action, data)
 #endif
     
     /* create a node */	
-    node = (struct timeout_q *)calloc(1, sizeof(struct timeout_q));
+    node = calloc(1, sizeof(struct timeout_q));
     if (!node) {
-	logit(LOG_ERR, 0, "Failed calloc() in timer_settimer\n");
+	logit(LOG_ERR, 0, "Ran out of memory in %s()", __func__);
 	return -1;
     }
+
     node->func = action; 
     node->data = data;
     node->time = delay; 
     node->next = 0;	
-    node->id   = ++id;
+    node->id   = next_id();
     
     prev = ptr = Q;
     
@@ -154,10 +157,8 @@ timer_setTimer(delay, action, data)
     else {
 	/* chase the pointer looking for the right place */
 	while (ptr) {
-	    
 	    if (delay < ptr->time) {
 		/* right place */
-		
 		node->next = ptr;
 		if (ptr == Q)
 		    Q = node;
@@ -165,25 +166,24 @@ timer_setTimer(delay, action, data)
 		    prev->next = node;
 		ptr->time -= node->time;
 		print_Q();
+
 		return node->id;
-	    } else  {
-		/* keep moving */
-		
-		delay -= ptr->time; node->time = delay;
-		prev = ptr;
-		ptr = ptr->next;
 	    }
+
+	    /* keep moving */
+	    delay -= ptr->time; node->time = delay;
+	    prev = ptr;
+	    ptr = ptr->next;
 	}
 	prev->next = node;
     }
     print_Q();
+
     return node->id;
 }
 
 /* returns the time until the timer is scheduled */
-int
-timer_leftTimer(timer_id)
-    int timer_id;
+int timer_leftTimer(int timer_id)
 {
     struct timeout_q *ptr;
     int left = 0;
@@ -196,13 +196,12 @@ timer_leftTimer(timer_id)
 	if (ptr->id == timer_id)
 	    return left;
     }
+
     return -1;
 }
 
 /* clears the associated timer */
-void
-timer_clearTimer(timer_id)
-    int  timer_id;
+void timer_clearTimer(int timer_id)
 {
     struct timeout_q  *ptr, *prev;
     
@@ -218,27 +217,26 @@ timer_clearTimer(timer_id)
     
     print_Q();
     while (ptr) {
-	if (ptr->id == timer_id) {
-	    /* got the right node */
-	    
-	    /* unlink it from the queue */
-	    if (ptr == Q)
-		Q = Q->next;
-	    else
-		prev->next = ptr->next;
-	    
-	    /* increment next node if any */
-	    if (ptr->next != 0)
-		(ptr->next)->time += ptr->time;
-	    
-	    if (ptr->data)
-		free(ptr->data);
-	    free(ptr);
-	    print_Q();
-	    return;
+	if (ptr->id != timer_id) {
+	    prev = ptr;
+	    ptr = ptr->next;
+	    continue;
 	}
-	prev = ptr;
-	ptr = ptr->next;
+
+	/* Found it, now unlink it from the queue */
+	if (ptr == Q)
+	    Q = ptr->next;
+	else
+	    prev->next = ptr->next;
+	    
+	/* increment next node if any */
+	if (ptr->next != 0)
+	    (ptr->next)->time += ptr->time;
+	    
+	if (ptr->data)
+	    free(ptr->data);
+	free(ptr);
+	break;
     }
     print_Q();
 }
@@ -247,14 +245,14 @@ timer_clearTimer(timer_id)
 /*
  * debugging utility
  */
-static void
-print_Q()
+static void print_Q(void)
 {
     struct timeout_q  *ptr;
     
-    IF_DEBUG(DEBUG_TIMEOUT)
+    IF_DEBUG(DEBUG_TIMEOUT) {
 	for (ptr = Q; ptr; ptr = ptr->next)
 	    logit(LOG_DEBUG, 0, "(%d,%d) ", ptr->id, ptr->time);
+    }
 }
 #endif /* CALLOUT_DEBUG2 */
 

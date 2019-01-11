@@ -640,7 +640,7 @@ static int parse_phyint(char *s)
 		    s = t;
 		}
 
-		ph = (struct phaddr *)calloc(1, sizeof(struct phaddr));
+		ph = calloc(1, sizeof(struct phaddr));
 		if (!ph)
 		    return FALSE;
 
@@ -699,7 +699,7 @@ static int parse_phyint(char *s)
 		    continue;
 		}
 
-		v_acl = (struct vif_acl *)calloc(1, sizeof(struct vif_acl));
+		v_acl = calloc(1, sizeof(struct vif_acl));
 		if (!v_acl)
 		    return FALSE;
 
@@ -1467,6 +1467,10 @@ static void fallback_config(void)
 {
     char buf[LINE_BUFSIZ], *s = buf;
 
+    if (no_fallback) {
+	logit(LOG_NOTICE, 0, "Skipping built-in defaults, no RP/BSR candidate.");
+	return;
+    }
     logit(LOG_NOTICE, 0, "Using built-in defaults, including RP/BSR candidate.");
 
     snprintf(buf, sizeof(buf), "priority 5 interval 60");

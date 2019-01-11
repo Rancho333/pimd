@@ -65,16 +65,23 @@ static void	rsrr_cache     (struct gtable *gt, struct rsrr_rq *route_query);
 /* Initialize RSRR socket */
 void rsrr_init(void)
 {
-    int servlen;
     struct sockaddr_un serv_addr;
+    int servlen, rc;
 
-    rsrr_recv_buf = (char *)calloc(1, RSRR_MAX_LEN);
-    rsrr_send_buf = (char *)calloc(1, RSRR_MAX_LEN);
-    if (!rsrr_recv_buf || !rsrr_send_buf)
+    rsrr_recv_buf = calloc(1, RSRR_MAX_LEN);
+    rsrr_send_buf = calloc(1, RSRR_MAX_LEN);
+    if (!rsrr_recv_buf || !rsrr_send_buf) {
 	logit(LOG_ERR, 0, "Ran out of memory in rsrr_init()");
+	return;
+    }
 
-    if ((rsrr_socket = socket(AF_UNIX, SOCK_DGRAM, 0)) < 0)
+    rsrr_socket = socket(AF_UNIX, SOCK_DGRAM, 0);
+    if (rsrr_socket < 0) {
 	logit(LOG_ERR, errno, "Cannot create RSRR socket");
+	free(rsrr_recv_buf);
+	free(rsrr_send_buf);
+	return;
+    }
 
     unlink(RSRR_SERV_PATH);
     memset(&serv_addr, 0, sizeof(serv_addr));
@@ -86,11 +93,13 @@ void rsrr_init(void)
 #else
     servlen = sizeof(serv_addr.sun_family) + strlen(serv_addr.sun_path);
 #endif
- 
-    if (bind(rsrr_socket, (struct sockaddr *) &serv_addr, servlen) < 0)
+
+    rc = bind(rsrr_socket, (struct sockaddr *) &serv_addr, servlen);
+    if (rc < 0)
 	logit(LOG_ERR, errno, "Cannot bind RSRR socket");
 
-    if (register_input_handler(rsrr_socket, rsrr_read) < 0)
+    rc = register_input_handler(rsrr_socket, rsrr_read);
+    if (rc < 0)
 	logit(LOG_ERR, 0, "Could not register RSRR as an input handler");
 }
 
@@ -266,8 +275,8 @@ static int rsrr_accept_rq(struct rsrr_rq *route_query, uint8_t flags, struct gta
     /* Blank routing entry for error. */
     route_reply->in_vif = 0;
     route_reply->reserved = 0;
-    route_reply->out_vif_bm = 0;
-    
+    PIMD_VIFM_CLRALL(route_reply->out_vifs);
+
     /* Get the size. */
     sendlen = RSRR_RR_LEN;
     
@@ -280,7 +289,7 @@ static int rsrr_accept_rq(struct rsrr_rq *route_query, uint8_t flags, struct gta
     if (gt_notify) {
 	/* Include the routing entry. */
 	route_reply->in_vif = gt_notify->incoming;
-	route_reply->out_vif_bm = gt_notify->oifs;
+	PIMD_VIFM_COPY(gt_notify->oifs, route_reply->out_vifs);
 	gt = gt_notify;
 	status_ok = TRUE;
     } else if ((gt = find_route(route_query->source_addr,
@@ -289,7 +298,7 @@ static int rsrr_accept_rq(struct rsrr_rq *route_query, uint8_t flags, struct gta
 				DONT_CREATE)) != (struct gtable *)NULL) {
 	status_ok = TRUE;
 	route_reply->in_vif = gt->incoming;
-	route_reply->out_vif_bm = gt->oifs;
+	PIMD_VIFM_COPY(gt->oifs, route_reply->out_vifs);
     }
     if (status_ok != TRUE) {
 	/* Set error bit. */
@@ -409,13 +418,20 @@ static int rsrr_accept_rq(struct rsrr_rq *route_query, uint8_t flags, struct gta
 	}
     }
 #endif /* pimd - mrouted specific code */
-    
+
     IF_DEBUG(DEBUG_RSRR) {
-	logit(LOG_DEBUG, 0, "%sSend RSRR Route Reply for src %s dst %s in vif %d out vif %d",
+	char oifs[MAXVIFS + 1];
+	int vifi;
+
+	for (vifi = 0; vifi < numvifs; vifi++)
+	    oifs[vifi] =  PIMD_VIFM_ISSET(vifi, route_reply->out_vifs) ? 'o' : '.';
+	oifs[vifi] = 0;
+
+	logit(LOG_DEBUG, 0, "%sSend RSRR Route Reply for src %s dst %s in vif %d out vifs %s",
 	      gt_notify ? "Route Change: " : "",
 	      inet_fmt(route_reply->source_addr, s1, sizeof(s1)),
 	      inet_fmt(route_reply->dest_addr, s2, sizeof(s2)),
-	      route_reply->in_vif,route_reply->out_vif_bm);
+	      route_reply->in_vif, oifs);
     }
 
     /* Send it. */
@@ -489,9 +505,11 @@ static void rsrr_cache(struct gtable *gt, struct rsrr_rq *route_query)
     /* Cache entry doesn't already exist.  Create one and insert at
      * front of list.
      */
-    rc = (struct rsrr_cache *)calloc(1, sizeof(struct rsrr_cache));
-    if (rc == NULL)
+    rc = calloc(1, sizeof(struct rsrr_cache));
+    if (!rc) {
 	logit(LOG_ERR, 0, "Ran out of memory in rsrr_cache()");
+	return;
+    }
 
     rc->route_query.source_addr = route_query->source_addr;
     rc->route_query.dest_addr = route_query->dest_addr;
@@ -505,6 +523,7 @@ static void rsrr_cache(struct gtable *gt, struct rsrr_rq *route_query)
     rc->next = gt->gt_rsrr_cache;
     gt->gt_rsrr_cache = rc;
 #endif /* PIM */
+
     IF_DEBUG(DEBUG_RSRR) {
 	logit(LOG_DEBUG, 0, "Cached query id %ld from client %s",
 	      rc->route_query.query_id, rc->client_addr.sun_path);

@@ -302,7 +302,6 @@ extern int		build_jp_message_pool_counter;
 extern uint32_t		virtual_time;
 extern char            *ident;
 extern char	       *config_file;
-extern int              haveterminal;
 extern char            *prognm;
 
 extern struct cand_rp_adv_message_ {
@@ -313,21 +312,33 @@ extern struct cand_rp_adv_message_ {
 } cand_rp_adv_message;
 
 extern int do_vifs;
+extern int no_fallback;
 extern int retry_forever;
 extern int mrt_table_id;
 
 /*
  * pimd <--> pimctl IPC
  */
-#define IPC_OK_CMD     0
-#define IPC_STAT_CMD   1
-#define IPC_IFACE_CMD  2
-#define IPC_NEIGH_CMD  3
-#define IPC_ERR_CMD    255
+#define IPC_OK_CMD                0
+#define IPC_RESTART_CMD           1
+#define IPC_SHOW_STATUS_CMD       2
+#define IPC_DEBUG_CMD             3
+#define IPC_LOGLEVEL_CMD          4
+#define IPC_KILL_CMD              9
+#define IPC_SHOW_IGMP_GROUPS_CMD  10
+#define IPC_SHOW_IGMP_IFACE_CMD   11
+#define IPC_SHOW_PIM_IFACE_CMD    20
+#define IPC_SHOW_PIM_NEIGH_CMD    21
+#define IPC_SHOW_PIM_ROUTE_CMD    22
+#define IPC_SHOW_PIM_RP_CMD       23
+#define IPC_SHOW_PIM_CRP_CMD      24
+#define IPC_SHOW_PIM_DUMP_CMD     250
+#define IPC_ERR_CMD               255
 
 struct ipc {
     uint8_t cmd;
-    char    buf[255];
+    uint8_t detail;
+    char    buf[766];
 };
 
 /*
@@ -479,20 +490,6 @@ extern int	timer_leftTimer		(int);
 extern void	config_vifs_from_kernel	(void);
 extern void	config_vifs_from_file	(void);
 
-/* debug.c */
-extern char	*packet_kind		(int proto, int type, int code);
-extern int	debug_kind		(int proto, int type, int code);
-extern void	log_init		(int log_stdout);
-extern void	logit			(int, int, const char *, ...);
-extern void	dump_frame		(char *desc, void *dump, size_t len);
-extern int	log_level		(int proto, int type, int code);
-extern void	fdump			(char *fmt);
-extern void	cdump			(char *fmt);
-extern void	dump_vifs		(FILE *fp);
-extern void	dump_ssm		(FILE *fp);
-extern void	dump_pim_mrt		(FILE *fp);
-extern int	dump_rp_set		(FILE *fp);
-
 /* dvmrp_proto.c */
 extern void	dvmrp_accept_probe	(uint32_t src, uint32_t dst, uint8_t *p, int datalen, uint32_t level);
 extern void	dvmrp_accept_report	(uint32_t src, uint32_t dst, uint8_t *p, int datalen, uint32_t level);
@@ -546,6 +543,8 @@ extern int	k_get_sg_cnt		(int socket, uint32_t source, uint32_t group, struct sg
 
 /* main.c */
 extern int	register_input_handler	(int fd, ihfunc_t func);
+extern int      daemon_restart          (void *arg);
+extern int      daemon_kill             (void *arg);
 
 /* ipc.c */
 extern void     ipc_init                (void);
@@ -680,7 +679,7 @@ struct rp_hold {
 	uint32_t	address;
 	uint32_t	group;
 	uint32_t	mask;
-	uint8_t	priority;
+	uint8_t		priority;
 };
 
 /* compat declarations */

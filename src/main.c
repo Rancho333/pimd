@@ -48,8 +48,8 @@
 
 char versionstring[100];
 int do_vifs       = 1;
+int no_fallback   = 0;
 int retry_forever = 0;
-int haveterminal  = 1;
 struct rp_hold *g_rp_hold = NULL;
 int mrt_table_id = 0;
 
@@ -58,13 +58,9 @@ char *prognm      = NULL;
 char *pid_file    = NULL;
 char *config_file = NULL;
 
-extern int loglevel;
-
 static int sighandled = 0;
 #define GOT_SIGINT      0x01
 #define GOT_SIGHUP      0x02
-#define GOT_SIGUSR1     0x04
-#define GOT_SIGUSR2     0x08
 #define GOT_SIGALRM     0x10
 
 #define NHANDLERS       3
@@ -73,82 +69,6 @@ static struct ihandler {
     ihfunc_t func;		/* Function to call with &fd_set */
 } ihandlers[NHANDLERS];
 static int nhandlers = 0;
-
-static struct debugname {
-    char	*name;
-    uint32_t	 level;
-    size_t	 nchars;
-} debugnames[] = {
-    {   "dvmrp_detail",	    DEBUG_DVMRP_DETAIL,   5	    },
-    {   "dvmrp_prunes",	    DEBUG_DVMRP_PRUNE,    8	    },
-    {   "dvmrp_pruning",    DEBUG_DVMRP_PRUNE,    8	    },
-    {   "dvmrp_routes",	    DEBUG_DVMRP_ROUTE,    7	    },
-    {   "dvmrp_routing",    DEBUG_DVMRP_ROUTE,    7	    },
-    {	"dvmrp_mrt",	    DEBUG_DVMRP_ROUTE,	  7	    },
-    {	"dvmrp_neighbors",  DEBUG_DVMRP_PEER,	  7	    },
-    {	"dvmrp_peers",	    DEBUG_DVMRP_PEER,	  8	    },
-    {	"dvmrp_hello",	    DEBUG_DVMRP_PEER,	  7	    },
-    {	"dvmrp_timers",	    DEBUG_DVMRP_TIMER,	  7	    },
-    {	"dvmrp",	    DEBUG_DVMRP,	  1	    },
-    {	"igmp_proto",	    DEBUG_IGMP_PROTO,	  6	    },
-    {	"igmp_timers",	    DEBUG_IGMP_TIMER,	  6	    },
-    {	"igmp_members",	    DEBUG_IGMP_MEMBER,	  6	    },
-    {	"groups",	    DEBUG_MEMBER,	  1	    },
-    {	"membership",	    DEBUG_MEMBER,	  2	    },
-    {	"igmp",		    DEBUG_IGMP,		  1	    },
-    {	"trace",	    DEBUG_TRACE,	  2	    },
-    {	"mtrace",	    DEBUG_TRACE,	  2	    },
-    {	"traceroute",	    DEBUG_TRACE,	  2	    },
-    {	"timeout",	    DEBUG_TIMEOUT,	  2	    },
-    {	"callout",	    DEBUG_TIMEOUT,	  3	    },
-    {	"packets",	    DEBUG_PKT,		  2	    },
-    {	"pkt",		    DEBUG_PKT,		  2	    },
-    {	"interfaces",	    DEBUG_IF,		  2	    },
-    {	"vif",		    DEBUG_IF,		  1	    },
-    {	"kernel",	    DEBUG_KERN,		  2	    },
-    {	"cache",	    DEBUG_MFC,		  1	    },
-    {	"mfc",		    DEBUG_MFC,		  2	    },
-    {	"k_cache",	    DEBUG_MFC,		  2	    },
-    {	"k_mfc",	    DEBUG_MFC,		  2	    },
-    {	"rsrr",		    DEBUG_RSRR,		  2	    },
-    {	"pim_detail",	    DEBUG_PIM_DETAIL,	  5	    },
-    {	"pim_hello",	    DEBUG_PIM_HELLO,	  5	    },
-    {	"pim_neighbors",    DEBUG_PIM_HELLO,	  5	    },
-    {	"pim_peers",	    DEBUG_PIM_HELLO,	  5	    },
-    {	"pim_register",	    DEBUG_PIM_REGISTER,	  5	    },
-    {	"registers",	    DEBUG_PIM_REGISTER,	  2	    },
-    {	"pim_join_prune",   DEBUG_PIM_JOIN_PRUNE, 5	    },
-    {	"pim_j_p",	    DEBUG_PIM_JOIN_PRUNE, 5	    },
-    {	"pim_jp",	    DEBUG_PIM_JOIN_PRUNE, 5	    },
-    {	"pim_bootstrap",    DEBUG_PIM_BOOTSTRAP,  5	    },
-    {	"pim_bsr",	    DEBUG_PIM_BOOTSTRAP,  5	    },
-    {	"bsr",		    DEBUG_PIM_BOOTSTRAP,  1	    },
-    {	"bootstrap",	    DEBUG_PIM_BOOTSTRAP,  1	    },
-    {	"pim_asserts",	    DEBUG_PIM_ASSERT,	  5	    },
-    {	"pim_cand_rp",	    DEBUG_PIM_CAND_RP,	  5	    },
-    {	"pim_c_rp",	    DEBUG_PIM_CAND_RP,	  5	    },
-    {	"pim_rp",	    DEBUG_PIM_CAND_RP,	  6	    },
-    {	"rp",		    DEBUG_PIM_CAND_RP,	  2	    },
-    {	"pim_routes",	    DEBUG_PIM_MRT,	  6	    },
-    {	"pim_routing",	    DEBUG_PIM_MRT,	  6	    },
-    {	"pim_mrt",	    DEBUG_PIM_MRT,	  5	    },
-    {	"pim_timers",	    DEBUG_PIM_TIMER,	  5	    },
-    {	"pim_rpf",	    DEBUG_PIM_RPF,	  6	    },
-    {	"rpf",		    DEBUG_RPF,		  3	    },
-    {	"pim",		    DEBUG_PIM,		  1	    },
-    {	"routes",	    DEBUG_MRT,		  1	    },
-    {	"routing",	    DEBUG_MRT,		  1	    },
-    {	"mrt",		    DEBUG_MRT,		  1	    },
-    {	"neighbors",	    DEBUG_NEIGHBORS,	  1	    },
-    {	"routers",	    DEBUG_NEIGHBORS,	  6	    },
-    {	"mrouters",	    DEBUG_NEIGHBORS,	  7	    },
-    {	"peers",	    DEBUG_NEIGHBORS,	  1	    },
-    {	"timers",	    DEBUG_TIMER,	  1	    },
-    {	"asserts",	    DEBUG_ASSERT,	  1	    },
-    {	"all",		    DEBUG_ALL,		  2	    },
-    {	"3",		    0xffffffff,		  1	    }	 /* compat. */
-};
-
 
 /*
  * Forward declarations.
@@ -208,8 +128,10 @@ static int compose_paths(void)
 	size_t len = strlen(SYSCONFDIR) + strlen(ident) + 7;
 
 	config_file = malloc(len);
-	if (!config_file)
+	if (!config_file) {
 	    logit(LOG_ERR, errno, "Failed allocating memory, exiting.");
+	    exit(1);
+	}
 
 	snprintf(config_file, len, _PATH_PIMD_CONF, ident);
     }
@@ -223,10 +145,8 @@ static int compose_paths(void)
 
 static int usage(int code)
 {
-    size_t i;
-    char line[76] = "  ";
     char pidfn[80];
-    struct debugname *d;
+    char buf[768];
 
     compose_paths();
     if (pid_file && pid_file[0] != '/')
@@ -234,17 +154,18 @@ static int usage(int code)
     else
 	snprintf(pidfn, sizeof(pidfn), "%s", pid_file);
 
-    printf("Usage: %s [-DhlNnv] [-f FILE] [-d [SYS][,SYS...]] [-s LEVEL]\n\n", prognm);
+    printf("Usage: %s [-hnrsv] [-f FILE] [-i NAME] [-d [SYS][,SYS...]] [-l LEVEL]\n\n", prognm);
     printf(" -f, --config=FILE   Configuration file, default uses ident NAME: %s\n", config_file);
+    printf("     --no-fallback   When started without a config file, skip RP/BSR fallbacks\n");
     printf(" -n, --foreground    Run in foreground, do not detach from calling terminal\n");
-    printf(" -d SYS[,SYS,SYS..]  Enable debug for SYS, see below for valid systems\n");
-    printf(" -l, --loglevel=LVL  Set log level: none, err, info, notice (default), debug\n");
-    printf(" -I, --ident=NAME    Identity for config + PID file, and syslog, default: %s\n", ident);
-    printf(" -N, --disable-vifs  Disable all virtual interfaces (phyint) by default\n");
-    printf(" -P, --pidfile=FILE  File to store process ID for signaling %s\n"
+    printf(" -d, --debug=SYS     Enable debug for subystem(s) SYS, separate more with comma\n");
+    printf(" -l, --loglevel=LVL  Set log level: none, err, notice (default), info, debug\n");
+    printf(" -i, --ident=NAME    Identity for config + PID file, and syslog, default: %s\n", ident);
+    printf("     --pidfile=FILE  File to store process ID for signaling %s\n"
 	   "                     Default uses ident NAME: %s\n", prognm, pidfn);
-    printf(" -r                  Retry (forever) if not all phyint interfaces are available\n"
-	   "                     yet when starting up, e.g. wait for DHCP lease\n");
+    printf(" -r                  Retry (forever) if not all configured phyint interfaces are\n"
+	   "                     available when starting up, e.g. wait for DHCP lease\n");
+    printf("     --disable-vifs  Disable all virtual interfaces (phyint) by default\n");
     printf(" -s, --syslog        Use syslog, default unless running in foreground, -n\n");
     printf(" -t, --table-id=ID   Set multicast routing table ID.  Allowed table ID#:\n"
 	   "                      0 .. 999999999.  Default: 0 (use default table)\n");
@@ -252,31 +173,45 @@ static int usage(int code)
     printf(" -v, --version       Show %s version\n", prognm);
     printf("\n");
 
-    /* From pimd v2.3.0 we show *all* the debug levels again */
     printf("Available subsystems for debug:\n");
-    for (i = 0, d = debugnames; i < ARRAY_LEN(debugnames); i++, d++) {
-	if (strlen(line) + strlen(d->name) + 3 >= sizeof(line)) {
-	    /* Finish this line and send to console */
-	    strlcat(line, "\n", sizeof(line));
-	    printf("%s", line);
+    if (!debug_list(DEBUG_ALL, buf, sizeof(buf))) {
+	char line[82] = "  ";
+	char *ptr;
 
-	    /* Prepare for next line */
-	    strlcpy(line, "  ", sizeof(line));
+	ptr = strtok(buf, " ");
+	while (ptr) {
+	    char *sys = ptr;
+	    char buf[20];
+
+	    ptr = strtok(NULL, " ");
+
+	    /* Flush line */
+	    if (strlen(line) + strlen(sys) + 3 >= sizeof(line)) {
+		puts(line);
+		strlcpy(line, "  ", sizeof(line));
+	    }
+
+	    if (ptr)
+		snprintf(buf, sizeof(buf), "%s ", sys);
+	    else
+		snprintf(buf, sizeof(buf), "%s", sys);
+
+	    strlcat(line, buf, sizeof(line));
 	}
 
-	strlcat(line, d->name, sizeof(line));
-
-	if (i + 1 < ARRAY_LEN(debugnames))
-	    strlcat(line, ", ", sizeof(line));
+	puts(line);
     }
-    /* Flush remaining line. */
-    strlcat(line, "\n", sizeof(line));
-    printf("%s", line);
 
     printf("\nBug report address: %-40s\n", PACKAGE_BUGREPORT);
 #ifdef PACKAGE_URL
     printf("Project homepage: %s\n", PACKAGE_URL);
 #endif
+
+    if (config_file)
+	free(config_file);
+
+    if (pid_file)
+	free(pid_file);
 
     return code;
 }
@@ -298,70 +233,55 @@ int main(int argc, char *argv[])
 {
     int foreground = 0, do_syslog = 1;
     fd_set fds;
-    int nfds, fd, n = -1, i, ch;
+    int nfds, fd, n = -1, i, ch, rc;
     struct sigaction sa;
     struct option long_options[] = {
 	{ "config",        1, 0, 'f' },
-	{ "disable-vifs",  0, 0, 'N' },
+	{ "debug",         1, 0, 'd' },
+	{ "no-fallback",   0, 0, 500 },
+	{ "disable-vifs",  0, 0, 501 },
 	{ "foreground",    0, 0, 'n' },
 	{ "help",          0, 0, 'h' },
-	{ "ident",         1, 0, 'I' },
+	{ "ident",         1, 0, 'i' },
 	{ "loglevel",      1, 0, 'l' },
-	{ "pidfile",       1, 0, 'P' },
+	{ "pidfile",       1, 0, 502 },
 	{ "syslog",        0, 0, 's' },
 	{ "table-id",      1, 0, 't' },
 	{ "version",       0, 0, 'v' },
 	{ NULL, 0, 0, 0 }
     };
 
-    snprintf(versionstring, sizeof (versionstring), "pimd version %s", PACKAGE_VERSION);
+    snprintf(versionstring, sizeof(versionstring), "pimd version %s", PACKAGE_VERSION);
 
     prognm = ident = progname(argv[0]);
-    while ((ch = getopt_long(argc, argv, "d:f:hI:l:nNP:rst:v", long_options, NULL)) != EOF) {
+    while ((ch = getopt_long(argc, argv, "d:f:hi:l:nrst:v", long_options, NULL)) != EOF) {
 	const char *errstr;
 
 	switch (ch) {
 	    case 'd':
-		{
-		    char *p,*q;
-		    size_t i, len;
-		    struct debugname *d;
-
-		    debug = 0;
-		    p = optarg;
-		    q = NULL;
-		    while (p) {
-			q = strchr(p, ',');
-			if (q)
-			    *q++ = '\0';
-			len = strlen(p);
-			for (i = 0, d = debugnames; i < ARRAY_LEN(debugnames); i++, d++) {
-			    if (len >= d->nchars && strncmp(d->name, p, len) == 0)
-				break;
-			}
-
-			if (i == ARRAY_LEN(debugnames))
-			    return usage(1);
-
-			debug |= d->level;
-			p = q;
-		    }
-		}
+		rc = debug_parse(optarg);
+		if ((int)DEBUG_PARSE_FAIL == rc)
+		    return usage(1);
+		debug = rc;
 		break;
 
 	    case 'f':
-		config_file = optarg;
+		config_file = strdup(optarg);
+		break;
+
+	    case 500:
+		no_fallback = 1;
 		break;
 
 	    case 'h':
 		return usage(0);
 
-	    case 'I':	/* --ident=NAME */
+	    case 'i':	/* --ident=NAME */
 		ident = optarg;
 		break;
 
 	    case 'l':
-		loglevel = loglvl(optarg);
+		loglevel = log_str2lvl(optarg);
 		if (-1 == loglevel)
 		    return usage(1);
 		break;
@@ -371,11 +291,11 @@ int main(int argc, char *argv[])
 		foreground = 1;
 		break;
 
-	    case 'N':
+	    case 501:	/* --disable-vifs */
 		do_vifs = 0;
 		break;
 
-	    case 'P':	/* --pidfile=NAME */
+	    case 502:	/* --pidfile=NAME */
 		pid_file = strdup(optarg);
 		break;
 
@@ -414,26 +334,15 @@ int main(int argc, char *argv[])
     compose_paths();
     setlinebuf(stderr);
 
-    if (debug != 0) {
-	struct debugname *d;
-	char c;
-	int tmpd = debug;
+    if (debug) {
+	char buf[350];
 
-	fprintf(stderr, "debug level 0x%lx ", debug);
-	c = '(';
-	for (d = debugnames; d < debugnames + ARRAY_LEN(debugnames); d++) {
-	    if ((tmpd & d->level) == d->level) {
-		tmpd &= ~d->level;
-		fprintf(stderr, "%c%s", c, d->name);
-		c = ',';
-	    }
-	}
-	fprintf(stderr, ")\n");
+	debug_list(debug, buf, sizeof(buf));
+	printf("debug level 0x%lx (%s)\n", debug, buf);
     }
 
-    if (!debug && !foreground) {
+    if (!foreground) {
 	/* Detach from the terminal */
-	haveterminal = 0;
 	if (fork())
 	    exit(0);
 
@@ -473,7 +382,7 @@ int main(int argc, char *argv[])
     /*
      * Setup logging
      */
-    log_init(haveterminal && do_syslog > 0);
+    log_init(do_syslog);
     logit(LOG_NOTICE, 0, "%s starting ...", versionstring);
 
     do_randomize();
@@ -507,11 +416,6 @@ int main(int argc, char *argv[])
     sigaction(SIGINT, &sa, NULL);
     sigaction(SIGUSR1, &sa, NULL);
     sigaction(SIGUSR2, &sa, NULL);
-
-    IF_DEBUG(DEBUG_IF)
-	dump_vifs(stderr);
-    IF_DEBUG(DEBUG_PIM_MRT)
-	dump_pim_mrt(stderr);
 
     /* schedule first timer interrupt */
     timer_setTimer(TIMER_INTERVAL, timer, NULL);
@@ -601,6 +505,7 @@ static void timer(void *i __attribute__((unused)))
 static struct timeval *timeout(int n)
 {
     static struct timeval tv, difftime, curtime, lasttime;
+    static int init = 1;
     struct timeval *result = NULL;
     int secs;
 
@@ -621,8 +526,13 @@ static struct timeval *timeout(int n)
 	    curtime.tv_sec = lasttime.tv_sec + secs;
 	    curtime.tv_usec = lasttime.tv_usec;
 	    n = -1; /* don't do this next time through the loop */
-	} else
+	} else {
 	    gettimeofday(&curtime, NULL);
+	    if (init) {
+		init = 0;	/* First time only */
+		lasttime = curtime;
+	    }
+	}
 
 	difftime.tv_sec = curtime.tv_sec - lasttime.tv_sec;
 	difftime.tv_usec += curtime.tv_usec - lasttime.tv_usec;
@@ -651,8 +561,9 @@ static struct timeval *timeout(int n)
 /* TODO: implement all necessary stuff */
 static void cleanup(void)
 {
-    vifi_t vifi;
     struct uvif *v;
+    cand_rp_t *cand_rp;
+    vifi_t vifi;
 
     /* inform all neighbors that I'm going to die */
     for (vifi = 0, v = uvifs; vifi < numvifs; ++vifi, ++v) {
@@ -670,7 +581,76 @@ static void cleanup(void)
      * (probably by sending a the Cand-RP-set with my_priority=LOWEST?)
      */
 
-    k_stop_pim(igmp_socket);
+    for (cand_rp = cand_rp_list; cand_rp; cand_rp = cand_rp->next) {
+	rp_grp_entry_t *rp_grp;
+	mrtentry_t *mrt_rp;
+
+	mrt_rp = cand_rp->rpentry->mrtlink;
+	if (mrt_rp)
+	    delete_mrtentry(mrt_rp);
+
+	/* Just in case if that (*,*,RP) was deleted */
+	mrt_rp = cand_rp->rpentry->mrtlink;
+
+	for (rp_grp = cand_rp->rp_grp_next; rp_grp; rp_grp = rp_grp->rp_grp_next) {
+	    grpentry_t *grp;
+	    grpentry_t *grp_next;
+
+	    for (grp = rp_grp->grplink; grp; grp = grp_next) {
+		mrtentry_t *mrt_srcs_next;
+		mrtentry_t *mrt_srcs;
+		mrtentry_t *mrt_grp;
+
+		grp_next = grp->rpnext;
+		mrt_srcs = grp->mrtlink;
+
+		mrt_grp = grp->grp_route;
+		if (mrt_grp)
+		    delete_mrtentry(mrt_grp);
+
+		for (; mrt_srcs; mrt_srcs = mrt_srcs_next) {
+		    /* routing entry */
+		    mrt_srcs_next = mrt_srcs->grpnext;
+
+		    delete_mrtentry(mrt_srcs);
+		}
+	    }
+	}
+    }
+
+    delete_rp_list(&cand_rp_list, &grp_mask_list);
+    delete_rp_list(&segmented_cand_rp_list, &segmented_grp_mask_list);
+
+    restart(0);
+
+    if (srclist)
+	free(srclist);
+
+    if (grplist)
+	free(grplist);
+
+    if (cand_rp_adv_message.buffer)
+	free(cand_rp_adv_message.buffer);
+
+    if (pim_recv_buf)
+	free(pim_recv_buf);
+
+    if (pim_send_buf)
+	free(pim_send_buf);
+
+    if (igmp_recv_buf)
+	free(igmp_recv_buf);
+
+    if (igmp_send_buf)
+	free(igmp_send_buf);
+
+    if (config_file)
+	free(config_file);
+
+    if (pid_file)
+	free(pid_file);
+
+    ipc_exit();
 }
 
 
@@ -695,11 +675,7 @@ static void handle_signals(int sig)
 	break;
 
     case SIGUSR1:
-	sighandled |= GOT_SIGUSR1;
-	break;
-
-    case SIGUSR2:
-	sighandled |= GOT_SIGUSR2;
+	/* Ignore, don't die, backwards compat. */
 	break;
     }
 }
@@ -719,16 +695,6 @@ static int check_signals(void)
     if (sighandled & GOT_SIGHUP) {
 	sighandled &= ~GOT_SIGHUP;
 	restart(SIGHUP);
-    }
-
-    if (sighandled & GOT_SIGUSR1) {
-	sighandled &= ~GOT_SIGUSR1;
-	fdump(_PATH_PIMD_DUMP);
-    }
-
-    if (sighandled & GOT_SIGUSR2) {
-	sighandled &= ~GOT_SIGUSR2;
-	cdump(_PATH_PIMD_CACHE);
     }
 
     if (sighandled & GOT_SIGALRM) {
@@ -754,22 +720,27 @@ static void add_static_rp(void)
 
 static void del_static_rp(void)
 {
-    struct rp_hold *rph = g_rp_hold;
+    struct rp_hold *rph, *next;
 
+    rph = g_rp_hold;
     while (rph) {
+	next = rph->next;
+
 	delete_rp(&cand_rp_list, &grp_mask_list, rph->address);
-	rph = rph->next;
+	free(rph);
+
+	rph = next;
     }
+
+    g_rp_hold = NULL;
 }
 
 /* TODO: not verified */
 /*
  * Restart the daemon
  */
-static void restart(int i __attribute__((unused)))
+static void restart(int signo)
 {
-    logit(LOG_NOTICE, 0, "%s restarting ...", versionstring);
-
     /*
      * reset all the entries
      */
@@ -796,9 +767,14 @@ static void restart(int i __attribute__((unused)))
     /* Both for Linux netlink and BSD routing socket */
     close(routing_socket);
 
+    /* Exit here if called at cleanup() */
+    if (!signo)
+	return;
+
     /*
      * start processing again
      */
+    logit(LOG_NOTICE, 0, "%s restarting ...", versionstring);
 
     init_igmp();
     init_pim();
@@ -814,25 +790,45 @@ static void restart(int i __attribute__((unused)))
     timer_setTimer(TIMER_INTERVAL, timer, NULL);
 }
 
+int daemon_restart(void *arg)
+{
+    (void)arg;
+    restart(1);
+
+    return 0;
+}
+
+int daemon_kill(void *arg)
+{
+    (void)arg;
+    handle_signals(SIGTERM);
+
+    return 0;
+}
 
 static void resetlogging(void *arg)
 {
+    static int disabled = 0;
     int nxttime = 60;
-    void *narg = NULL;
 
-    if (arg == NULL && log_nmsgs >= LOG_MAX_MSGS) {
-	nxttime = LOG_SHUT_UP;
-	narg = (void *)&log_nmsgs;	/* just need some valid void * */
+    (void)arg;
+
+    if (!disabled && log_nmsgs >= LOG_MAX_MSGS) {
 	syslog(LOG_WARNING, "logging too fast, shutting up for %d minutes",
 	       LOG_SHUT_UP / 60);
+
+	disabled = 1;
+	nxttime = LOG_SHUT_UP;
     } else {
-	if (arg != NULL) {
+	if (disabled) {
 	    syslog(LOG_NOTICE, "logging enabled again after rate limiting");
+	    disabled = 0;
 	}
+
 	log_nmsgs = 0;
     }
 
-    timer_setTimer(nxttime, resetlogging, narg);
+    timer_setTimer(nxttime, resetlogging, NULL);
 }
 
 /**

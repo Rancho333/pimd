@@ -124,14 +124,6 @@ void accept_membership_query(uint32_t src, uint32_t dst __attribute__((unused)),
     if (local_address(src) != NO_VIF)
 	return;
 
-    /* Only v3 is allowed for SSM
-     * TODO: Rate-limit messages?
-     */
-    if (igmp_version != 3 && IN_PIM_SSM_RANGE(group)) {
-	logit(LOG_WARNING, 0, "SSM addresses are not allowed in v%d query.", igmp_version);
-	return;
-    }
-
     /* TODO: modify for DVMRP?? */
     if ((vifi = find_vif_direct(src)) == NO_VIF) {
 	IF_DEBUG(DEBUG_IGMP)
@@ -190,7 +182,7 @@ void accept_membership_query(uint32_t src, uint32_t dst __attribute__((unused)),
 	    }
 
 	    if (!v->uv_querier) {
-		v->uv_querier = (struct listaddr *) calloc(1, sizeof(struct listaddr));
+		v->uv_querier = calloc(1, sizeof(struct listaddr));
 		if (!v->uv_querier) {
 		    logit(LOG_ERR, 0, "Failed calloc() in accept_membership_query()");
 		    return;
@@ -289,16 +281,20 @@ void accept_group_report(uint32_t igmp_src, uint32_t ssm_src, uint32_t group, in
      */
     for (g = v->uv_groups; g != NULL; g = g->al_next) {
 	if (group == g->al_addr) {
+	    int old_report = 0;
+
 	    if (igmp_report_type == IGMP_V1_MEMBERSHIP_REPORT) {
 		g->al_old = DVMRP_OLD_AGE_THRESHOLD;
-		if (!IN_PIM_SSM_RANGE(group) && g->al_pv>1) {
+		old_report = 1;
+
+		if (g->al_pv > 1) {
 		    IF_DEBUG(DEBUG_IGMP)
 			logit(LOG_DEBUG, 0, "Change IGMP compatibility mode to v1 for group %s", s3);
 		    g->al_pv = 1;
 		}
-	    } else if (!IN_PIM_SSM_RANGE(group) && igmp_report_type == IGMP_V2_MEMBERSHIP_REPORT) {
-		IF_DEBUG(DEBUG_IGMP)
-		    logit(LOG_DEBUG,0, "%s(): al_pv=%d", __func__, g->al_pv);
+	    } else if (igmp_report_type == IGMP_V2_MEMBERSHIP_REPORT) {
+		old_report = 1;
+
 		if (g->al_pv > 2) {
 		    IF_DEBUG(DEBUG_IGMP)
 			logit(LOG_DEBUG, 0, "Change IGMP compatibility mode to v2 for group %s", s3);
@@ -319,8 +315,7 @@ void accept_group_report(uint32_t igmp_src, uint32_t ssm_src, uint32_t group, in
 	    g->al_timerid = SetTimer(vifi, g, ssm_src);
 
 	    /* Reset timer for switching version back every time an older version report is received */
-	    if (!IN_PIM_SSM_RANGE(group) && g->al_pv<3 && (igmp_report_type == IGMP_V1_MEMBERSHIP_REPORT ||
-		igmp_report_type == IGMP_V2_MEMBERSHIP_REPORT)) {
+	    if (g->al_pv < 3 && old_report) {
 		if (g->al_versiontimer)
 			g->al_versiontimer = DeleteTimer(g->al_versiontimer);
 
@@ -342,7 +337,7 @@ void accept_group_report(uint32_t igmp_src, uint32_t ssm_src, uint32_t group, in
 		}
 		if (!s) {
 		    /* Add new source */
-		    s = (struct listaddr *)calloc(1, sizeof(struct listaddr));
+		    s = calloc(1, sizeof(struct listaddr));
 		    if (!s) {
 			logit(LOG_ERR, errno, "%s(): Ran out of memory", __func__);
 			return;
@@ -363,6 +358,8 @@ void accept_group_report(uint32_t igmp_src, uint32_t ssm_src, uint32_t group, in
 		    logit(LOG_INFO, 0, "Add leaf (%s,%s)", s1, s3);
 		add_leaf(vifi, ssm_src, group);
 	    } else {
+		IF_DEBUG(DEBUG_IGMP)
+		    logit(LOG_INFO, 0, "Add leaf (*,%s)", s3);
 		add_leaf(vifi, INADDR_ANY_N, group);
 	    }
 	    break;
@@ -373,19 +370,19 @@ void accept_group_report(uint32_t igmp_src, uint32_t ssm_src, uint32_t group, in
      * If not found, add it to the list and update kernel cache.
      */
     if (!g) {
-	g = (struct listaddr *)calloc(1, sizeof(struct listaddr));
+	g = calloc(1, sizeof(struct listaddr));
 	if (!g) {
 	    logit(LOG_ERR, errno, "%s(): Ran out of memory", __func__);
 	    return;
 	}
 
 	g->al_addr = group;
-	if (!IN_PIM_SSM_RANGE(group) && igmp_report_type == IGMP_V1_MEMBERSHIP_REPORT) {
+	if (igmp_report_type == IGMP_V1_MEMBERSHIP_REPORT) {
 	    g->al_old = DVMRP_OLD_AGE_THRESHOLD;
 	    IF_DEBUG(DEBUG_IGMP)
 		logit(LOG_DEBUG, 0, "Change IGMP compatibility mode to v1 for group %s", s3);
 	    g->al_pv = 1;
-	} else if (!IN_PIM_SSM_RANGE(group) && igmp_report_type == IGMP_V2_MEMBERSHIP_REPORT) {
+	} else if (igmp_report_type == IGMP_V2_MEMBERSHIP_REPORT) {
 	    IF_DEBUG(DEBUG_IGMP)
 		logit(LOG_DEBUG, 0, "Change IGMP compatibility mode to v2 for group %s", s3);
 	    g->al_pv = 2;
@@ -395,7 +392,7 @@ void accept_group_report(uint32_t igmp_src, uint32_t ssm_src, uint32_t group, in
 
 	/* Add new source */
 	if (IN_PIM_SSM_RANGE(group)) {
-	    s = (struct listaddr *)calloc(1, sizeof(struct listaddr));
+	    s = calloc(1, sizeof(struct listaddr));
 	    if (!s) {
 		logit(LOG_ERR, errno, "%s(): Ran out of memory", __func__);
 		return;
@@ -414,9 +411,8 @@ void accept_group_report(uint32_t igmp_src, uint32_t ssm_src, uint32_t group, in
 	g->al_timerid   = SetTimer(vifi, g, ssm_src);
 
 	/* Set timer for swithing version back if an older version report is received */
-	if (!IN_PIM_SSM_RANGE(group) && g->al_pv<3) {
+	if (g->al_pv < 3)
 	    g->al_versiontimer = SetVersionTimer(vifi, g);
-	}
 
 	g->al_next      = v->uv_groups;
 	v->uv_groups    = g;
@@ -430,7 +426,7 @@ void accept_group_report(uint32_t igmp_src, uint32_t ssm_src, uint32_t group, in
 	    add_leaf(vifi, ssm_src, group);
 	} else {
 	    IF_DEBUG(DEBUG_IGMP)
-		logit(LOG_INFO, 0, "SM group order from  %s (*,%s)", s1, s3);
+		logit(LOG_INFO, 0, "ASM group order from  %s (*,%s)", s1, s3);
 	    add_leaf(vifi, INADDR_ANY_N, group);
 	}
     }
@@ -549,6 +545,8 @@ static void SwitchVersion(void *arg)
 
     logit(LOG_INFO, 0, "Switch IGMP compatibility mode back to v%d for group %s",
 	  cbk->g->al_pv, inet_fmt(cbk->g->al_addr, s1, sizeof(s1)));
+
+    free(cbk);
 }
 
 /*
@@ -639,11 +637,15 @@ void accept_membership_report(uint32_t src, uint32_t dst, struct igmpv3_report *
 	switch (rec_type) {
 	    case IGMP_MODE_IS_EXCLUDE:
 		/* RFC 4604: A router SHOULD ignore a group record of
-		   type MODE_IS_EXCLUDE if it refers to an SSM destination address */
+		 *           type MODE_IS_EXCLUDE if it refers to an SSM
+		 *           destination address.
+		 */
 		if (!IN_PIM_SSM_RANGE(rec_group.s_addr)) {
-		    if (rec_num_sources==0) {
-			/* RFC 5790: EXCLUDE (*,G) join can be interpreted by the router
-			   as a request to include all sources. */
+		    if (rec_num_sources == 0) {
+			/* RFC 5790: EXCLUDE (*,G) join can be
+			 *           interpreted by the router as a
+			 *           request to include all sources.
+			 */
 			accept_group_report(src, 0 /*dst*/, rec_group.s_addr, report->type);
 		    } else {
 			/* RFC 5790: LW-IGMPv3 does not use EXCLUDE filter-mode with a non-null source address list.*/
@@ -654,11 +656,15 @@ void accept_membership_report(uint32_t src, uint32_t dst, struct igmpv3_report *
 
 	    case IGMP_CHANGE_TO_EXCLUDE_MODE:
 		/* RFC 4604: A router SHOULD ignore a group record of
-		   type CHANGE_TO_EXCLUDE_MODE if it refers to an SSM destination address */
+		 *           type CHANGE_TO_EXCLUDE_MODE if it refers to
+		 *           an SSM destination address.
+		 */
 		if (!IN_PIM_SSM_RANGE(rec_group.s_addr)) {
-		    if (rec_num_sources==0) {
-			/* RFC 5790: EXCLUDE (*,G) join can be interpreted by the router
-			   as a request to include all sources. */
+		    if (rec_num_sources == 0) {
+			/* RFC 5790: EXCLUDE (*,G) join can be
+			 *           interpreted by the router as a
+			 *           request to include all sources.
+			 */
 			accept_group_report(src, 0 /*dst*/, rec_group.s_addr, report->type);
 		    } else {
 			/* RFC 5790: LW-IGMPv3 does not use EXCLUDE filter-mode with a non-null source address list.*/
@@ -709,7 +715,7 @@ void accept_membership_report(uint32_t src, uint32_t dst, struct igmpv3_report *
 		break;
 
 	    default:
-		//  RFC3376: Unrecognized Record Type values MUST be silently ignored.
+		/* RFC3376: Unrecognized Record Type values MUST be silently ignored. */
 		break;
 	}
 
@@ -719,6 +725,7 @@ void accept_membership_report(uint32_t src, uint32_t dst, struct igmpv3_report *
 
 /*
  * Calculate group membership timeout
+ * Note: same as "Older Host Present Interval", RFC3376:8.13
  */
 static uint32_t igmp_group_membership_timeout(void)
 {
@@ -730,14 +737,27 @@ static uint32_t igmp_group_membership_timeout(void)
  */
 static void DelVif(void *arg)
 {
-    cbk_t *cbk = (cbk_t *)arg;
-    vifi_t vifi = cbk->vifi;
-    struct uvif *v = &uvifs[vifi];
-    struct listaddr *a, **anp, *g = cbk->g;
-    struct listaddr *curr, *prev = NULL;
+    struct listaddr **anp;
+    struct listaddr *group, *g;
+    struct uvif *v;
+    vifi_t vifi;
+    cbk_t *cbk;
 
-    if (IN_PIM_SSM_RANGE(g->al_addr)) {
-	for (curr = g->al_sources; curr; prev = curr, curr = curr->al_next) {
+    cbk = (cbk_t *)arg;
+    if (!arg)
+	return;
+
+    group = cbk->g;
+    vifi = cbk->vifi;
+    if (vifi >= MAXVIFS)
+	return;
+
+    v = &uvifs[vifi];
+
+    if (IN_PIM_SSM_RANGE(group->al_addr)) {
+	struct listaddr *curr, *prev = NULL;
+
+	for (curr = group->al_sources; curr; prev = curr, curr = curr->al_next) {
 	    inet_fmt(cbk->source, s1, sizeof(s1));
 	    inet_fmt(curr->al_addr, s2, sizeof(s2));
 	    IF_DEBUG(DEBUG_IGMP)
@@ -745,9 +765,12 @@ static void DelVif(void *arg)
 
 	    if (curr->al_addr == cbk->source) {
 		if (!prev)
-		    g->al_sources = curr->al_next; /* Remove from beginning */
+		    group->al_sources = curr->al_next; /* Remove from beginning */
 		else
 		    prev->al_next = curr->al_next;
+
+		/* Stop any SwitchVersion() timer */
+		timer_clearTimer(curr->al_versiontimer);
 
 		free(curr);
 		break;
@@ -755,12 +778,12 @@ static void DelVif(void *arg)
 	}
 
 	IF_DEBUG(DEBUG_IGMP)
-	    logit(LOG_DEBUG, 0, "DelVif: %s sources left", g->al_sources ? "Still" : "No");
-	if (g->al_sources) {
+	    logit(LOG_DEBUG, 0, "DelVif: %s sources left", group->al_sources ? "Still" : "No");
+	if (group->al_sources) {
 	    IF_DEBUG(DEBUG_IGMP)
 		logit(LOG_DEBUG, 0, "DelVif: Not last source, g->al_sources --> %s",
-		      inet_fmt(g->al_sources->al_addr, s1, sizeof(s1)));
-	    delete_leaf(vifi, cbk->source, g->al_addr);
+		      inet_fmt(group->al_sources->al_addr, s1, sizeof(s1)));
+	    delete_leaf(vifi, cbk->source, group->al_addr);
 	    free(cbk);
 
 	    return;    /* This was not last source for this interface */
@@ -771,14 +794,14 @@ static void DelVif(void *arg)
      * Group has expired
      * delete all kernel cache entries with this group
      */
-    if (g->al_query)
-	DeleteTimer(g->al_query);
+    if (group->al_query)
+	DeleteTimer(group->al_query);
 
-    if (g->al_versiontimer)
-	DeleteTimer(g->al_versiontimer);
+    if (group->al_versiontimer)
+	DeleteTimer(group->al_versiontimer);
 
-    if (IN_PIM_SSM_RANGE(g->al_addr)) {
-	inet_fmt(g->al_addr, s1, sizeof(s1));
+    if (IN_PIM_SSM_RANGE(group->al_addr)) {
+	inet_fmt(group->al_addr, s1, sizeof(s1));
 	inet_fmt(cbk->source, s2, sizeof(s2));
 	IF_DEBUG(DEBUG_IGMP)
 	    logit(LOG_DEBUG, 0, "SSM range, source specific delete");
@@ -786,19 +809,19 @@ static void DelVif(void *arg)
 	/* delete (S,G) entry */
 	IF_DEBUG(DEBUG_IGMP)
 	    logit(LOG_DEBUG, 0, "DelVif: vif:%d(%s), (S=%s,G=%s)", vifi, v->uv_name, s2, s1);
-	delete_leaf(vifi, cbk->source, g->al_addr);
+	delete_leaf(vifi, cbk->source, group->al_addr);
     } else {
-	delete_leaf(vifi, INADDR_ANY_N, g->al_addr);
+	delete_leaf(vifi, INADDR_ANY_N, group->al_addr);
     }
 
-    anp = &(v->uv_groups);
-    while ((a = *anp)) {
-	if (a == g) {
-	    *anp = a->al_next;
-	    free(a->al_sources);
-	    free(a);
+    anp = &v->uv_groups;
+    while ((g = *anp)) {
+	if (g == group) {
+	    *anp = g->al_next;
+	    free(g->al_sources);
+	    free(g);
 	} else {
-	    anp = &a->al_next;
+	    anp = &g->al_next;
 	}
     }
 
@@ -812,7 +835,7 @@ static int SetVersionTimer(vifi_t vifi, struct listaddr *g)
 {
     cbk_t *cbk;
 
-    cbk = (cbk_t *)calloc(1, sizeof(cbk_t));
+    cbk = calloc(1, sizeof(cbk_t));
     if (!cbk) {
 	logit(LOG_ERR, 0, "Failed calloc() in SetVersionTimer()\n");
 	return -1;
@@ -821,8 +844,7 @@ static int SetVersionTimer(vifi_t vifi, struct listaddr *g)
     cbk->vifi = vifi;
     cbk->g = g;
 
-    return timer_setTimer(IGMP_ROBUSTNESS_VARIABLE * igmp_query_interval + IGMP_QUERY_RESPONSE_INTERVAL,
-			  SwitchVersion, cbk);
+    return timer_setTimer(igmp_group_membership_timeout(), SwitchVersion, cbk);
 }
 
 /*
@@ -832,7 +854,7 @@ static int SetTimer(vifi_t vifi, struct listaddr *g, uint32_t source)
 {
     cbk_t *cbk;
 
-    cbk = (cbk_t *)calloc(1, sizeof(cbk_t));
+    cbk = calloc(1, sizeof(cbk_t));
     if (!cbk) {
 	logit(LOG_ERR, 0, "Failed calloc() in SetTimer()");
 	return -1;
@@ -893,7 +915,7 @@ static int SetQueryTimer(struct listaddr *g, vifi_t vifi, int to_expire, int q_t
 {
     cbk_t *cbk;
 
-    cbk = (cbk_t *)calloc(1, sizeof(cbk_t));
+    cbk = calloc(1, sizeof(cbk_t));
     if (!cbk) {
 	logit(LOG_ERR, 0, "Failed calloc() in SetQueryTimer()");
 	return -1;
